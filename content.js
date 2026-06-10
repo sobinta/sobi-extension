@@ -96,7 +96,7 @@
         gain.gain.linearRampToValueAtTime(0.001, ctx.currentTime + 0.25);
         osc.start();
         osc.stop(ctx.currentTime + 0.25);
-
+      }
     } catch(e){}
   }
 
