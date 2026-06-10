@@ -104,7 +104,8 @@
   function showPanel(){
     isMini=false;
     TAB.style.cssText='position:fixed!important;display:none!important;';
-    PANEL.style.cssText='position:fixed!important;bottom:0!important;right:0!important;width:320px!important;max-height:560px!important;display:flex!important;flex-direction:column!important;z-index:2147483647!important;';
+    PANEL.style.cssText='position:fixed!important;bottom:0!important;right:20px!important;width:320px!important;max-height:560px!important;display:flex!important;flex-direction:column!important;z-index:2147483647!important;';
+    document.body.appendChild(PANEL); // bring to front of DOM stacking context
     save();
   }
   
@@ -456,7 +457,6 @@
     var pri = document.getElementById('ft-pri');
     var cat = document.getElementById('ft-cat');
     var due = document.getElementById('ft-due');
-    var time = document.getElementById('ft-time');
     var addBtn = document.getElementById('ft-addbtn');
     
     if (inp) inp.value = todo.text;
@@ -480,7 +480,6 @@
     }
     
     if (due) due.value = todo.due || '';
-    if (time) time.value = todo.time || '';
     if (addBtn) addBtn.innerHTML = '💾'; // تغییر دکمه افزودن به دکمه ذخیره
     if (inp) inp.focus();
   }
@@ -495,7 +494,6 @@
     if (document.getElementById('ft-pri')) document.getElementById('ft-pri').value = 'none';
     if (document.getElementById('ft-cat')) document.getElementById('ft-cat').value = '';
     if (document.getElementById('ft-due')) document.getElementById('ft-due').value = '';
-    if (document.getElementById('ft-time')) document.getElementById('ft-time').value = '';
   }
 
   function saveTodo(){
@@ -505,7 +503,7 @@
     var priVal = (document.getElementById('ft-pri')||{}).value||'none';
     var catVal = (document.getElementById('ft-cat')||{}).value||'';
     var dueVal = (document.getElementById('ft-due')||{}).value||'';
-    var timeVal = (document.getElementById('ft-time')||{}).value||'';
+    var timeVal = '';
 
     if (editingTodoId) {
       // حالت ویرایش
@@ -541,7 +539,6 @@
     if(document.getElementById('ft-pri')) document.getElementById('ft-pri').value='none';
     if(document.getElementById('ft-cat')) document.getElementById('ft-cat').value='';
     if(document.getElementById('ft-due')) document.getElementById('ft-due').value='';
-    if(document.getElementById('ft-time')) document.getElementById('ft-time').value='';
 
     save();updateList();updateProgress();
   }
@@ -665,7 +662,6 @@
         '<select id="ft-pri"><option value="none">اولویت</option><option value="high">🔴 زیاد</option><option value="medium">🟡 متوسط</option><option value="low">🟢 کم</option></select>'+
         '<select id="ft-cat"><option value="">دسته</option><option value="کار">کار</option><option value="شخصی">شخصی</option><option value="خرید">خرید</option><option value="تحصیل">تحصیل</option><option value="custom">دیگر...</option></select>'+
         '<input id="ft-due" type="date"/>'+
-        '<input id="ft-time" type="time" title="ساعت یادآوری"/>' +
       '</div>'+
       '<input id="ft-srch" type="text" placeholder="🔍 جستجو..." autocomplete="off"/>'+
       '<div id="ft-prog"><div id="ft-pbar"><div id="ft-pfill"></div></div><div id="ft-ptxt"></div></div>'+
