@@ -98,6 +98,63 @@
     transform: scale(1.2) !important;
 }
 
+/* Pomodoro Timer Layout */
+#ft-pomo {
+    background: rgba(0, 0, 0, 0.15) !important;
+    padding: 10px 14px !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    border-bottom: 1px solid rgba(128, 128, 128, 0.1) !important;
+    flex-shrink: 0 !important;
+}
+
+#ft-pomo-timer {
+    font-family: monospace !important;
+    font-size: 1.55rem !important;
+    font-weight: 700 !important;
+    color: var(--ac) !important;
+    letter-spacing: 1px !important;
+    text-shadow: 0 0 10px rgba(124, 111, 247, 0.2) !important;
+}
+
+#ft-pomo-label {
+    font-size: 0.75rem !important;
+    font-weight: 600 !important;
+    opacity: 0.8 !important;
+}
+
+#ft-pomo-controls {
+    display: flex !important;
+    gap: 6px !important;
+}
+
+.ft-pomo-btn {
+    background: rgba(255, 255, 255, 0.05) !important;
+    border: 1px solid rgba(128, 128, 128, 0.15) !important;
+    border-radius: 6px !important;
+    color: inherit !important;
+    cursor: pointer !important;
+    width: 26px !important;
+    height: 26px !important;
+    font-size: 11px !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    padding: 0 !important;
+    transition: all 0.2s ease !important;
+}
+
+#ft-panel[data-dark="0"] .ft-pomo-btn {
+    background: rgba(0, 0, 0, 0.05) !important;
+}
+
+.ft-pomo-btn:hover {
+    background: var(--ac) !important;
+    color: #fff !important;
+    border-color: var(--ac) !important;
+}
+
 /* Filter Row */
 #ft-filters {
     display: flex !important;
@@ -192,12 +249,12 @@
     flex-shrink: 0 !important;
 }
 
-#ft-opts select, #ft-due {
+#ft-opts select, #ft-due, #ft-time {
     flex: 1 !important;
     border-radius: 8px !important;
     border: 1px solid transparent !important;
-    padding: 6px 8px !important;
-    font-size: 0.75rem !important;
+    padding: 6px 6px !important;
+    font-size: 0.72rem !important;
     font-family: inherit !important;
     direction: rtl !important;
     outline: none !important;
@@ -205,19 +262,19 @@
     transition: all 0.2s ease !important;
 }
 
-#ft-panel[data-dark="1"] #ft-opts select, #ft-panel[data-dark="1"] #ft-due {
+#ft-panel[data-dark="1"] #ft-opts select, #ft-panel[data-dark="1"] #ft-due, #ft-panel[data-dark="1"] #ft-time {
     background: rgba(255, 255, 255, 0.05) !important;
     color: #cbd5e1 !important;
     border-color: rgba(255, 255, 255, 0.08) !important;
 }
 
-#ft-panel[data-dark="0"] #ft-opts select, #ft-panel[data-dark="0"] #ft-due {
+#ft-panel[data-dark="0"] #ft-opts select, #ft-panel[data-dark="0"] #ft-due, #ft-panel[data-dark="0"] #ft-time {
     background: #e2e8f0 !important;
     color: #334155 !important;
     border-color: rgba(0, 0, 0, 0.05) !important;
 }
 
-#ft-opts select:focus, #ft-due:focus {
+#ft-opts select:focus, #ft-due:focus, #ft-time:focus {
     border-color: var(--ac) !important;
 }
 
@@ -309,8 +366,7 @@
 /* Individual Task Card */
 .ftitem {
     display: flex !important;
-    align-items: center !important;
-    gap: 10px !important;
+    flex-direction: column !important;
     padding: 10px 12px !important;
     border-radius: 12px !important;
     margin-bottom: 6px !important;
@@ -334,8 +390,15 @@
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1) !important;
 }
 
+.ftitem-mainrow {
+    display: flex !important;
+    align-items: center !important;
+    gap: 10px !important;
+    width: 100% !important;
+}
+
 .ftdone {
-    opacity: 0.5 !important;
+    opacity: 0.55 !important;
 }
 
 .ftdone .fttxt {
@@ -418,7 +481,7 @@
 }
 
 /* Edit and Delete Actions */
-.ftedit, .ftdel {
+.ftedit, .ftdel, .ft-sub-toggle {
     background: transparent !important;
     border: none !important;
     cursor: pointer !important;
@@ -438,13 +501,275 @@
     color: #ef5350 !important;
 }
 
-.ftitem:hover .ftedit, .ftitem:hover .ftdel {
+.ft-sub-toggle {
+    color: var(--text-muted) !important;
+    opacity: 0.5 !important;
+}
+
+.ftitem:hover .ftedit, .ftitem:hover .ftdel, .ftitem:hover .ft-sub-toggle {
     opacity: 0.65 !important;
 }
 
-.ftedit:hover, .ftdel:hover {
+.ftedit:hover, .ftdel:hover, .ft-sub-toggle:hover {
     opacity: 1 !important;
     background: rgba(128, 128, 128, 0.1) !important;
+}
+
+/* ── Sub-tasks Checklist Layout ─────────────────────────────────────────────── */
+.ft-sub-wrapper {
+    width: 100% !important;
+    padding: 6px 12px 2px 28px !important;
+    border-top: 1px dashed rgba(128, 128, 128, 0.1) !important;
+    margin-top: 8px !important;
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 4px !important;
+}
+
+.ft-sub-list {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 4px !important;
+}
+
+.ft-sub-item {
+    display: flex !important;
+    align-items: center !important;
+    gap: 8px !important;
+    font-size: 0.78rem !important;
+    padding: 3px 0 !important;
+}
+
+.ft-sub-cb {
+    width: 14px !important;
+    height: 14px !important;
+    border: 1.5px solid var(--ac) !important;
+    border-radius: 4px !important;
+    cursor: pointer !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    font-size: 8px !important;
+    font-weight: bold !important;
+    flex-shrink: 0 !important;
+}
+
+.ft-sub-cbon {
+    background: var(--ac) !important;
+    color: #fff !important;
+}
+
+.ft-sub-txt {
+    flex: 1 !important;
+    word-break: break-all !important;
+}
+
+.ft-sub-done {
+    text-decoration: line-through !important;
+    opacity: 0.55 !important;
+}
+
+.ft-sub-del {
+    background: transparent !important;
+    border: none !important;
+    color: #ef5350 !important;
+    cursor: pointer !important;
+    font-size: 8px !important;
+    opacity: 0 !important;
+    padding: 2px 4px !important;
+    border-radius: 4px !important;
+    transition: opacity 0.2s !important;
+}
+
+.ft-sub-item:hover .ft-sub-del {
+    opacity: 0.65 !important;
+}
+
+.ft-sub-del:hover {
+    opacity: 1 !important;
+    background: rgba(239, 68, 68, 0.08) !important;
+}
+
+.ft-sub-addrow {
+    display: flex !important;
+    gap: 6px !important;
+    margin-top: 4px !important;
+}
+
+.ft-sub-inp {
+    flex: 1 !important;
+    border-radius: 6px !important;
+    border: 1px solid rgba(128, 128, 128, 0.15) !important;
+    padding: 4px 8px !important;
+    font-size: 0.72rem !important;
+    font-family: inherit !important;
+    outline: none !important;
+    background: transparent !important;
+}
+
+#ft-panel[data-dark="1"] .ft-sub-inp {
+    color: #cbd5e1 !important;
+    border-color: rgba(255, 255, 255, 0.08) !important;
+}
+
+#ft-panel[data-dark="0"] .ft-sub-inp {
+    color: #334155 !important;
+    border-color: rgba(0, 0, 0, 0.1) !important;
+}
+
+.ft-sub-addbtn {
+    background: var(--ac) !important;
+    color: #fff !important;
+    border: none !important;
+    border-radius: 6px !important;
+    cursor: pointer !important;
+    width: 22px !important;
+    height: 22px !important;
+    font-size: 12px !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    padding: 0 !important;
+}
+
+/* ── Stats Dashboard Styling ────────────────────────────────────────────────── */
+.ft-stats-container {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 14px !important;
+    padding: 10px 4px !important;
+}
+
+.ft-stats-row-flex {
+    display: flex !important;
+    align-items: center !important;
+    gap: 16px !important;
+}
+
+.ft-stats-card {
+    flex: 1.2 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-content: center !important;
+    padding: 14px !important;
+    border-radius: 16px !important;
+    background: rgba(0,0,0,0.1) !important;
+    border: 1px solid rgba(128, 128, 128, 0.05) !important;
+}
+
+.ft-stats-details {
+    flex: 1.8 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 8px !important;
+}
+
+.ft-stats-detail-item {
+    font-size: 0.78rem !important;
+    display: flex !important;
+    justify-content: space-between !important;
+    font-weight: 500 !important;
+}
+
+.ft-stats-detail-label {
+    opacity: 0.7 !important;
+}
+
+.ft-stats-detail-value {
+    font-weight: 700 !important;
+}
+
+/* Custom SVG Progress Ring */
+.ft-stats-circle-wrapper {
+    position: relative !important;
+    width: 70px !important;
+    height: 70px !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+}
+
+.ft-stats-circle-wrapper svg {
+    transform: rotate(-90deg) !important;
+    width: 100% !important;
+    height: 100% !important;
+}
+
+.ft-stats-circle-bg {
+    fill: none !important;
+    stroke: rgba(128, 128, 128, 0.15) !important;
+    stroke-width: 6 !important;
+}
+
+.ft-stats-circle {
+    fill: none !important;
+    stroke: var(--ac) !important;
+    stroke-width: 6 !important;
+    stroke-linecap: round !important;
+    transition: stroke-dashoffset 0.5s ease-in-out !important;
+}
+
+.ft-stats-percent {
+    position: absolute !important;
+    font-size: 0.95rem !important;
+    font-weight: 800 !important;
+    font-family: monospace !important;
+    color: inherit !important;
+}
+
+/* Category Bars */
+.ft-stats-categories {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 8px !important;
+    background: rgba(0,0,0,0.08) !important;
+    padding: 12px !important;
+    border-radius: 16px !important;
+    border: 1px solid rgba(128, 128, 128, 0.03) !important;
+}
+
+.ft-stats-cat-title {
+    font-size: 0.8rem !important;
+    font-weight: 700 !important;
+    margin-bottom: 4px !important;
+    opacity: 0.9 !important;
+}
+
+.ft-stats-cat-item {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 3px !important;
+}
+
+.ft-stats-cat-info {
+    display: flex !important;
+    justify-content: space-between !important;
+    font-size: 0.72rem !important;
+    font-weight: 600 !important;
+}
+
+.ft-stats-bar-container {
+    height: 6px !important;
+    border-radius: 3px !important;
+    width: 100% !important;
+    overflow: hidden !important;
+}
+
+#ft-panel[data-dark="1"] .ft-stats-bar-container {
+    background: rgba(255,255,255,0.08) !important;
+}
+
+#ft-panel[data-dark="0"] .ft-stats-bar-container {
+    background: rgba(0,0,0,0.08) !important;
+}
+
+.ft-stats-bar-fill {
+    height: 100% !important;
+    border-radius: 3px !important;
+    background: var(--ac) !important;
+    width: 0% !important;
+    transition: width 0.4s ease-out !important;
 }
 
 /* Footer Section */
@@ -508,6 +833,40 @@
 
 #ft-srt:hover {
     opacity: 1 !important;
+}
+
+/* ── Backup actions ─────────────────────────────────────────────────────────── */
+.ft-backups-panel {
+    display: flex !important;
+    gap: 8px !important;
+    padding: 6px 14px 10px !important;
+    flex-shrink: 0 !important;
+    border-top: 1px dashed rgba(128, 128, 128, 0.08) !important;
+    margin-top: 2px !important;
+}
+
+.ft-bkp-btn {
+    flex: 1 !important;
+    background: rgba(128, 128, 128, 0.1) !important;
+    border: 1px solid rgba(128, 128, 128, 0.15) !important;
+    border-radius: 8px !important;
+    color: inherit !important;
+    padding: 5px 0 !important;
+    font-size: 0.7rem !important;
+    font-weight: 600 !important;
+    cursor: pointer !important;
+    font-family: inherit !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 4px !important;
+    transition: all 0.2s !important;
+}
+
+.ft-bkp-btn:hover {
+    background: var(--ac) !important;
+    color: #fff !important;
+    border-color: var(--ac) !important;
 }
 
 /* ==========================================================================

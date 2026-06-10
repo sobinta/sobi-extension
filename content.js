@@ -6,6 +6,14 @@
 
   var todos=[], filter='all', sortMode='newest', theme='purple';
   var darkMode=true, searchQ='', isMini=false, tabY=40, editingTodoId=null;
+  var expandedTodoIds={}; // آیدی تسک‌هایی که بخش زیروظایف آن‌ها باز است
+
+  // Pomodoro local variables
+  var pomoTimerInterval = null;
+  var pomoState = 'idle'; // idle, running, paused
+  var pomoMode = 'work'; // work, break
+  var pomoEndTime = null;
+  var pomoPausedRemaining = 1500; // default 25 mins in seconds
 
   var THEMES={purple:'#7c6ff7',rose:'#f06292',cyan:'#26c6da',green:'#66bb6a',amber:'#ffa726',red:'#ef5350'};
   var PRI={high:'#ef5350',medium:'#ffa726',low:'#66bb6a',none:'#7c6ff7'};
@@ -13,15 +21,38 @@
 
   // ── Storage ──────────────────────────────────────────────────────────────
   function save() {
-    try { chrome.storage.local.set({ft3_todos:todos,ft3_theme:theme,ft3_dark:darkMode,ft3_mini:isMini,ft3_tabY:tabY}); } catch(e){}
+    try { 
+      chrome.storage.local.set({
+        ft3_todos:todos,
+        ft3_theme:theme,
+        ft3_dark:darkMode,
+        ft3_mini:isMini,
+        ft3_tabY:tabY,
+        ft_pomo_state:pomoState,
+        ft_pomo_mode:pomoMode,
+        ft_pomo_end:pomoEndTime,
+        ft_pomo_paused_rem:pomoPausedRemaining
+      }); 
+    } catch(e){}
   }
   
   function load(cb) {
     try {
-      chrome.storage.local.get(['ft3_todos','ft3_theme','ft3_dark','ft3_mini','ft3_tabY'],function(r){
+      chrome.storage.local.get([
+        'ft3_todos','ft3_theme','ft3_dark','ft3_mini','ft3_tabY',
+        'ft_pomo_state','ft_pomo_mode','ft_pomo_end','ft_pomo_paused_rem'
+      ],function(r){
         todos=Array.isArray(r.ft3_todos)?r.ft3_todos:[];
-        theme=r.ft3_theme||'purple'; darkMode=r.ft3_dark!==false;
-        isMini=r.ft3_mini===true; tabY=typeof r.ft3_tabY==='number'?r.ft3_tabY:40;
+        theme=r.ft3_theme||'purple'; 
+        darkMode=r.ft3_dark!==false;
+        isMini=r.ft3_mini===true; 
+        tabY=typeof r.ft3_tabY==='number'?r.ft3_tabY:40;
+        
+        pomoState=r.ft_pomo_state||'idle';
+        pomoMode=r.ft_pomo_mode||'work';
+        pomoEndTime=r.ft_pomo_end||null;
+        pomoPausedRemaining=typeof r.ft_pomo_paused_rem==='number'?r.ft_pomo_paused_rem:1500;
+
         cb();
       });
     } catch(e){cb();}
@@ -29,12 +60,91 @@
   
   function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 
+  // ── تاریخ شمسی (Jalali Converter) ──────────────────────────────────────────
+  function toJalali(gy, gm, gd) {
+    var g_d_m = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 335];
+    var jy, jm, jd;
+    var gy2 = (gm > 2) ? (gy + 1) : gy;
+    var days = 365 * gy + parseInt((gy2 + 3) / 4) - parseInt((gy2 + 99) / 100) + parseInt((gy2 + 399) / 400) - 80 + gd + g_d_m[gm - 1];
+    jy = 979 + 33 * parseInt(days / 12053) + 4 * parseInt((days % 12053) / 1461);
+    days %= 12053;
+    days %= 1461;
+    if (days >= 366) {
+      jy += parseInt((days - 1) / 365);
+      days = (days - 1) % 365;
+    }
+    if (days < 186) {
+      jm = 1 + parseInt(days / 31);
+      jd = 1 + (days % 31);
+    } else {
+      jm = 7 + parseInt((days - 186) / 30);
+      jd = 1 + ((days - 186) % 30);
+    }
+    return [jy, jm, jd];
+  }
+
+  function formatJalali(dateStr, timeStr) {
+    if (!dateStr) return '';
+    var parts = dateStr.split('-');
+    if (parts.length !== 3) return dateStr;
+    var gy = parseInt(parts[0]);
+    var gm = parseInt(parts[1]);
+    var gd = parseInt(parts[2]);
+    var j = toJalali(gy, gm, gd);
+    var shamsiDate = j[0] + '/' + String(j[1]).padStart(2, '0') + '/' + String(j[2]).padStart(2, '0');
+    return shamsiDate + (timeStr ? ' ⏰ ' + timeStr : '');
+  }
+
+  // ── سنتز صوتی بوق و دینگ (Audio Chimes) ──────────────────────────────────────
+  function playSound(type) {
+    try {
+      var ctx = new (window.AudioContext || window.webkitAudioContext)();
+      var osc = ctx.createOscillator();
+      var gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      if (type === 'complete') {
+        // صدای دلنشین انجام کار (دینگ صعودی)
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(523.25, ctx.currentTime); // C5
+        osc.frequency.exponentialRampToValueAtTime(1046.50, ctx.currentTime + 0.12); // C6
+        gain.gain.setValueAtTime(0.12, ctx.currentTime);
+        gain.gain.linearRampToValueAtTime(0.001, ctx.currentTime + 0.25);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.25);
+      } else if (type === 'pomo-end') {
+        // بوق پایان پومودورو (دومرحله‌ای ملایم)
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(659.25, ctx.currentTime); // E5
+        gain.gain.setValueAtTime(0.15, ctx.currentTime);
+        gain.gain.linearRampToValueAtTime(0.001, ctx.currentTime + 0.2);
+        
+        var osc2 = ctx.createOscillator();
+        var gain2 = ctx.createGain();
+        osc2.connect(gain2);
+        gain2.connect(ctx.destination);
+        osc2.type = 'triangle';
+        osc2.frequency.setValueAtTime(880.00, ctx.currentTime + 0.2); // A5
+        gain2.gain.setValueAtTime(0.15, ctx.currentTime + 0.2);
+        gain2.gain.linearRampToValueAtTime(0.001, ctx.currentTime + 0.5);
+        
+        osc.start();
+        osc.stop(ctx.currentTime + 0.2);
+        osc2.start(ctx.currentTime + 0.2);
+        osc2.stop(ctx.currentTime + 0.5);
+      }
+    } catch(e){}
+  }
+
   // ── Show/Hide ────────────────────────────────────────────────────────────
   function showPanel(){
     isMini=false;
     TAB.style.cssText='position:fixed!important;display:none!important;';
     PANEL.style.cssText='position:fixed!important;bottom:0!important;right:0!important;width:320px!important;max-height:560px!important;display:flex!important;flex-direction:column!important;z-index:2147483647!important;';
     save();
+    // همگام‌سازی تایمر پومودورو هنگام باز شدن
+    syncPomoUI();
   }
   
   function showTab(){
@@ -77,18 +187,27 @@
       d.style.outlineOffset='2px';
       d.style.transform=d.dataset.t===theme?'scale(1.25)':'scale(1)';
     });
+    
+    // آپدیت کردن استایل دکمه‌های فیلتر با تم رنگی جدید
+    updateFilters();
+    
+    // رندر دایره پیشرفت آمار
+    if (filter === 'stats') {
+      renderStats();
+    }
   }
 
   // ── List ─────────────────────────────────────────────────────────────────
   function updateProgress(){
     var total=todos.length, done=todos.filter(function(t){return t.done;}).length;
-    var active=total-done, pct=total>0?Math.round(done/total*100):0;
+    var pct=total>0?Math.round(done/total*100):0;
     var fill=document.getElementById('ft-pfill'), txt=document.getElementById('ft-ptxt');
     if(fill) fill.style.width=pct+'%';
     if(txt) txt.textContent=total+' وظیفه — '+done+' انجام شده ('+pct+'%)';
     // نشانگر تعداد روی تب
+    var activeCount = total - done;
     var dot=document.getElementById('ft-tab-dot');
-    if(dot){ dot.style.display=active>0?'block':'none'; }
+    if(dot){ dot.style.display=activeCount>0?'block':'none'; }
   }
 
   function updateFilters(){
@@ -104,12 +223,19 @@
   function updateList(){
     var list=document.getElementById('ft-list');
     if(!list) return;
+    
+    // اگر فیلتر آمار انتخاب شده بود، پنل آمار را رندر کن
+    if (filter === 'stats') {
+      renderStats();
+      return;
+    }
+
     var items=todos.slice();
     if(filter==='active') items=items.filter(function(t){return !t.done;});
     if(filter==='done')   items=items.filter(function(t){return t.done;});
     if(searchQ){var q=searchQ.toLowerCase();items=items.filter(function(t){return t.text.toLowerCase().indexOf(q)!==-1;});}
     if(sortMode==='priority'){var o={high:0,medium:1,low:2,none:3};items.sort(function(a,b){return(o[a.priority]||3)-(o[b.priority]||3);});}
-    else if(sortMode==='due'){items.sort(function(a,b){if(!a.due&&!b.due)return 0;if(!a.due)return 1;if(!b.due)return -1;return new Date(a.due)-new Date(b.due);});}
+    else if(sortMode==='due'){items.sort(function(a,b){if(!a.due&&!b.due)return 0;if(!a.due)return 1;if(!b.due)return -1;return new Date(a.due + ' ' + (a.time || '00:00'))-new Date(b.due + ' ' + (b.time || '00:00'));});}
     else if(sortMode==='alpha'){items.sort(function(a,b){return a.text.localeCompare(b.text,'fa');});}
     else{items.sort(function(a,b){return b.createdAt-a.createdAt;});}
     
@@ -118,23 +244,74 @@
       return;
     }
     
+    var todayStr = new Date().getFullYear() + '-' + String(new Date().getMonth()+1).padStart(2,'0') + '-' + String(new Date().getDate()).padStart(2,'0');
+    var nowHourMin = String(new Date().getHours()).padStart(2,'0') + ':' + String(new Date().getMinutes()).padStart(2,'0');
+
     list.innerHTML=items.map(function(t){
-      var c=PRI[t.priority]||PRI.none, ov=t.due&&!t.done&&new Date(t.due)<new Date();
-      return '<div class="ftitem'+(t.done?' ftdone':'')+'" style="border-right:3px solid '+c+'">'+
-        '<div class="ftcb'+(t.done?' ftcbon':'')+'" data-chk="'+t.id+'" style="border-color:'+c+';'+(t.done?'background:'+c+';color:#fff;':'')+'">'+( t.done?'✓':'')+
-        '</div><div class="ftbody"><div class="fttxt">'+esc(t.text)+'</div>'+
-        '<div class="ftmeta">'+
-          (t.category?'<span class="fttag">'+esc(t.category)+'</span>':'')+
-          (t.priority&&t.priority!=='none'?'<span class="fttag" style="color:'+c+'">'+(t.priority==='high'?'🔴 زیاد':t.priority==='medium'?'🟡 متوسط':'🟢 کم')+'</span>':'')+
-          (t.due?'<span class="ftdue'+(ov?' ftov':'')+'">📅 '+t.due+(ov?' ⚠️':'')+'</span>':'')+
-        '</div></div>'+
-        '<button class="ftedit" data-edt="'+t.id+'">✏️</button>'+
-        '<button class="ftdel" data-del="'+t.id+'">✕</button></div>';
+      var c=PRI[t.priority]||PRI.none;
+      var isOverdue = t.due && !t.done && (t.due < todayStr || (t.due === todayStr && t.time && t.time < nowHourMin));
+      
+      // محاسبه وضعیت زیروظایف
+      var subtasks = Array.isArray(t.subtasks) ? t.subtasks : [];
+      var subDone = subtasks.filter(function(x){return x.done;}).length;
+      var subTotal = subtasks.length;
+      var hasSubs = subTotal > 0;
+      var subRatioStr = hasSubs ? ' (' + subDone + '/' + subTotal + ')' : '';
+      var isExpanded = !!expandedTodoIds[t.id];
+
+      // رندر HTML زیروظایف
+      var subtasksHTML = '';
+      if (isExpanded) {
+        subtasksHTML = '<div class="ft-sub-wrapper">' +
+          '<div class="ft-sub-list">' +
+            subtasks.map(function(st){
+              return '<div class="ft-sub-item">' +
+                '<div class="ft-sub-cb' + (st.done ? ' ft-sub-cbon' : '') + '" data-subchk="' + t.id + ':' + st.id + '">' + (st.done ? '✓' : '') + '</div>' +
+                '<span class="ft-sub-txt' + (st.done ? ' ft-sub-done' : '') + '">' + esc(st.text) + '</span>' +
+                '<button class="ft-sub-del" data-subdel="' + t.id + ':' + st.id + '">✕</button>' +
+              '</div>';
+            }).join('') +
+          '</div>' +
+          '<div class="ft-sub-addrow">' +
+            '<input class="ft-sub-inp" type="text" placeholder="زیرشاخه جدید..." data-subinp="' + t.id + '" autocomplete="off"/>' +
+            '<button class="ft-sub-addbtn" data-subadd="' + t.id + '">+</button>' +
+          '</div>' +
+        '</div>';
+      }
+
+      return '<div class="ftitem' + (t.done ? ' ftdone' : '') + '" style="border-right:3px solid ' + c + '">' +
+        '<div class="ftitem-mainrow">' +
+          '<div class="ftcb' + (t.done ? ' ftcbon' : '') + '" data-chk="' + t.id + '" style="border-color:' + c + ';' + (t.done ? 'background:' + c + ';color:#fff;' : '') + '">' + (t.done ? '✓' : '') + '</div>' +
+          '<div class="ftbody">' +
+            '<div class="fttxt">' + esc(t.text) + subRatioStr + '</div>' +
+            '<div class="ftmeta">' +
+              (t.category ? '<span class="fttag">' + esc(t.category) + '</span>' : '') +
+              (t.priority && t.priority !== 'none' ? '<span class="fttag" style="color:' + c + '">' + (t.priority === 'high' ? '🔴 زیاد' : t.priority === 'medium' ? '🟡 متوسط' : '🟢 کم') + '</span>' : '') +
+              (t.due ? '<span class="ftdue' + (isOverdue ? ' ftov' : '') + '">📅 ' + formatJalali(t.due, t.time) + (isOverdue ? ' ⚠️' : '') + '</span>' : '') +
+            '</div>' +
+          '</div>' +
+          '<button class="ft-sub-toggle" data-subexpand="' + t.id + '" title="زیروظایف">' + (isExpanded ? '▲' : '▼') + '</button>' +
+          '<button class="ftedit" data-edt="' + t.id + '">✏️</button>' +
+          '<button class="ftdel" data-del="' + t.id + '">✕</button>' +
+        '</div>' +
+        subtasksHTML +
+      '</div>';
     }).join('');
     
+    // ── بایندینگ رویدادهای لیست ──
     list.querySelectorAll('[data-chk]').forEach(function(el){
       el.addEventListener('click',function(e){e.stopPropagation();
-        for(var i=0;i<todos.length;i++){if(todos[i].id===el.dataset.chk){todos[i].done=!todos[i].done;break;}}
+        var isCompleting = false;
+        for(var i=0;i<todos.length;i++){
+          if(todos[i].id===el.dataset.chk){
+            todos[i].done=!todos[i].done;
+            isCompleting = todos[i].done;
+            break;
+          }
+        }
+        if (isCompleting) {
+          playSound('complete');
+        }
         save();updateList();updateProgress();});
     });
     
@@ -144,6 +321,7 @@
         if(editingTodoId === el.dataset.del) {
           cancelEditTodo();
         }
+        delete expandedTodoIds[el.dataset.del];
         save();updateList();updateProgress();});
     });
 
@@ -155,22 +333,175 @@
         }
       });
     });
+
+    // ساب تسک‌ها: گسترش پنل
+    list.querySelectorAll('[data-subexpand]').forEach(function(el){
+      el.addEventListener('click', function(e){e.stopPropagation();
+        var tid = el.dataset.subexpand;
+        expandedTodoIds[tid] = !expandedTodoIds[tid];
+        updateList();
+      });
+    });
+
+    // ساب تسک‌ها: تیک زدن چک‌باکس
+    list.querySelectorAll('[data-subchk]').forEach(function(el){
+      el.addEventListener('click', function(e){e.stopPropagation();
+        var parts = el.dataset.subchk.split(':');
+        var tid = parts[0], stid = parts[1];
+        
+        var todo = todos.find(function(x){return x.id === tid;});
+        if (todo && Array.isArray(todo.subtasks)) {
+          var st = todo.subtasks.find(function(x){return x.id === stid;});
+          if (st) {
+            st.done = !st.done;
+            if (st.done) {
+              playSound('complete');
+            }
+            save();
+            updateList();
+            updateProgress();
+          }
+        }
+      });
+    });
+
+    // ساب تسک‌ها: حذف
+    list.querySelectorAll('[data-subdel]').forEach(function(el){
+      el.addEventListener('click', function(e){e.stopPropagation();
+        var parts = el.dataset.subdel.split(':');
+        var tid = parts[0], stid = parts[1];
+        
+        var todo = todos.find(function(x){return x.id === tid;});
+        if (todo && Array.isArray(todo.subtasks)) {
+          todo.subtasks = todo.subtasks.filter(function(x){return x.id !== stid;});
+          save();
+          updateList();
+          updateProgress();
+        }
+      });
+    });
+
+    // ساب تسک‌ها: افزودن جدید
+    list.querySelectorAll('[data-subadd]').forEach(function(el){
+      el.addEventListener('click', function(e){e.stopPropagation();
+        var tid = el.dataset.subadd;
+        addSubtask(tid);
+      });
+    });
+
+    list.querySelectorAll('[data-subinp]').forEach(function(el){
+      el.addEventListener('keydown', function(e){e.stopPropagation();
+        if (e.key === 'Enter') {
+          var tid = el.dataset.subinp;
+          addSubtask(tid);
+        }
+      });
+    });
   }
 
-  // ── Edit Mode Logic ──────────────────────────────────────────────────────
+  function addSubtask(todoId) {
+    var inp = document.querySelector('[data-subinp="' + todoId + '"]');
+    var val = inp ? inp.value.trim() : '';
+    if (!val) return;
+
+    var todo = todos.find(function(x){return x.id === todoId;});
+    if (todo) {
+      if (!Array.isArray(todo.subtasks)) todo.subtasks = [];
+      todo.subtasks.push({
+        id: Math.random().toString(36).slice(2),
+        text: val,
+        done: false
+      });
+      if (inp) inp.value = '';
+      save();
+      updateList();
+      updateProgress();
+    }
+  }
+
+  // ── پنل نمایش آمار (Stats View) ───────────────────────────────────────────────
+  function renderStats() {
+    var list = document.getElementById('ft-list');
+    if (!list) return;
+
+    var total = todos.length;
+    var done = todos.filter(function(x){return x.done;}).length;
+    var active = total - done;
+    var pct = total > 0 ? Math.round(done / total * 100) : 0;
+    
+    // محاسبه آماری دسته‌بندی‌ها
+    var catStats = {};
+    todos.forEach(function(t) {
+      var cat = t.category || 'بدون دسته';
+      if (!catStats[cat]) catStats[cat] = { total: 0, done: 0 };
+      catStats[cat].total++;
+      if (t.done) catStats[cat].done++;
+    });
+
+    // رسم SVG دایره پیشرفت
+    var radius = 28;
+    var circumference = 2 * Math.PI * radius;
+    var offset = circumference - (pct / 100 * circumference);
+
+    var c = THEMES[theme] || THEMES.purple;
+
+    var html = '<div class="ft-stats-container">' +
+      '<div class="ft-stats-row-flex">' +
+        '<div class="ft-stats-card">' +
+          '<div class="ft-stats-circle-wrapper">' +
+            '<svg>' +
+              '<circle class="ft-stats-circle-bg" cx="35" cy="35" r="' + radius + '"></circle>' +
+              '<circle class="ft-stats-circle" cx="35" cy="35" r="' + radius + '" style="stroke-dasharray: ' + circumference + '; stroke-dashoffset: ' + offset + '; stroke: ' + c + ';"></circle>' +
+            '</svg>' +
+            '<span class="ft-stats-percent">' + pct + '%</span>' +
+          '</div>' +
+          '<span style="font-size:0.65rem;margin-top:6px;font-weight:700;opacity:0.8">درصد موفقیت</span>' +
+        '</div>' +
+        
+        '<div class="ft-stats-details">' +
+          '<div class="ft-stats-detail-item"><span class="ft-stats-detail-label">کل وظایف:</span><span class="ft-stats-detail-value">' + total + '</span></div>' +
+          '<div class="ft-stats-detail-item"><span class="ft-stats-detail-label">انجام‌شده:</span><span class="ft-stats-detail-value" style="color:#66bb6a">' + done + '</span></div>' +
+          '<div class="ft-stats-detail-item"><span class="ft-stats-detail-label">باقی‌مانده:</span><span class="ft-stats-detail-value" style="color:#ef5350">' + active + '</span></div>' +
+        '</div>' +
+      '</div>' +
+
+      '<div class="ft-stats-categories">' +
+        '<div class="ft-stats-cat-title">📊 وضعیت دسته‌بندی‌ها</div>' +
+        Object.entries(catStats).map(function(entry) {
+          var name = entry[0];
+          var stat = entry[1];
+          var catPct = stat.total > 0 ? Math.round(stat.done / stat.total * 100) : 0;
+          return '<div class="ft-stats-cat-item">' +
+            '<div class="ft-stats-cat-info">' +
+              '<span>' + esc(name) + '</span>' +
+              '<span>' + stat.done + '/' + stat.total + ' (' + catPct + '%)</span>' +
+            '</div>' +
+            '<div class="ft-stats-bar-container">' +
+              '<div class="ft-stats-bar-fill" style="width: ' + catPct + '%; background: ' + c + '"></div>' +
+            '</div>' +
+          '</div>';
+        }).join('') +
+        (Object.keys(catStats).length === 0 ? '<div style="font-size: 0.75rem;opacity:0.5;text-align:center;">داده‌ای وجود ندارد</div>' : '') +
+      '</div>' +
+    '</div>';
+
+    list.innerHTML = html;
+  }
+
+  // ── ویرایشگر تسک ──────────────────────────────────────────────────────────
   function startEditTodo(todo) {
     editingTodoId = todo.id;
     var inp = document.getElementById('ft-inp');
     var pri = document.getElementById('ft-pri');
     var cat = document.getElementById('ft-cat');
     var due = document.getElementById('ft-due');
+    var time = document.getElementById('ft-time');
     var addBtn = document.getElementById('ft-addbtn');
     
     if (inp) inp.value = todo.text;
     if (pri) pri.value = todo.priority || 'none';
     
     if (cat) {
-      // چک کردن وجود مقدار دسته‌بندی در لیست، در غیر این‌صورت درج پویای آن
       var exists = false;
       for (var i = 0; i < cat.options.length; i++) {
         if (cat.options[i].value === todo.category) {
@@ -188,7 +519,8 @@
     }
     
     if (due) due.value = todo.due || '';
-    if (addBtn) addBtn.innerHTML = '💾'; // تغییر دکمه افزودن به دکمه دیسک/ذخیره
+    if (time) time.value = todo.time || '';
+    if (addBtn) addBtn.innerHTML = '💾'; // تغییر دکمه افزودن به دکمه ذخیره
     if (inp) inp.focus();
   }
 
@@ -202,6 +534,7 @@
     if (document.getElementById('ft-pri')) document.getElementById('ft-pri').value = 'none';
     if (document.getElementById('ft-cat')) document.getElementById('ft-cat').value = '';
     if (document.getElementById('ft-due')) document.getElementById('ft-due').value = '';
+    if (document.getElementById('ft-time')) document.getElementById('ft-time').value = '';
   }
 
   function saveTodo(){
@@ -211,6 +544,7 @@
     var priVal = (document.getElementById('ft-pri')||{}).value||'none';
     var catVal = (document.getElementById('ft-cat')||{}).value||'';
     var dueVal = (document.getElementById('ft-due')||{}).value||'';
+    var timeVal = (document.getElementById('ft-time')||{}).value||'';
 
     if (editingTodoId) {
       // حالت ویرایش
@@ -220,6 +554,7 @@
           todos[i].priority = priVal;
           todos[i].category = catVal;
           todos[i].due = dueVal;
+          todos[i].time = timeVal;
           break;
         }
       }
@@ -235,6 +570,8 @@
         priority:priVal,
         category:catVal,
         due:dueVal,
+        time:timeVal,
+        subtasks:[],
         createdAt:Date.now()
       });
     }
@@ -243,8 +580,189 @@
     if(document.getElementById('ft-pri')) document.getElementById('ft-pri').value='none';
     if(document.getElementById('ft-cat')) document.getElementById('ft-cat').value='';
     if(document.getElementById('ft-due')) document.getElementById('ft-due').value='';
+    if(document.getElementById('ft-time')) document.getElementById('ft-time').value='';
 
     save();updateList();updateProgress();
+  }
+
+  // ── مدیریت پومودورو (Pomodoro Client logic) ──────────────────────────────────
+  function syncPomoUI() {
+    chrome.storage.local.get(['ft_pomo_state', 'ft_pomo_mode', 'ft_pomo_end', 'ft_pomo_paused_rem'], function(r) {
+      pomoState = r.ft_pomo_state || 'idle';
+      pomoMode = r.ft_pomo_mode || 'work';
+      pomoEndTime = r.ft_pomo_end || null;
+      pomoPausedRemaining = typeof r.ft_pomo_paused_rem === 'number' ? r.ft_pomo_paused_rem : 1500;
+      
+      clearInterval(pomoTimerInterval);
+      
+      if (pomoState === 'running' && pomoEndTime) {
+        pomoTimerInterval = setInterval(updatePomoTimer, 1000);
+        updatePomoTimer();
+      } else {
+        renderPomoStatic();
+      }
+    });
+  }
+
+  function renderPomoStatic() {
+    var secs = pomoPausedRemaining;
+    if (pomoState === 'idle') {
+      secs = pomoMode === 'work' ? 1500 : 300; // 25m or 5m
+    }
+    
+    var m = Math.floor(secs / 60);
+    var s = secs % 60;
+    
+    var timerEl = document.getElementById('ft-pomo-timer');
+    if (timerEl) {
+      timerEl.textContent = String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+    }
+
+    var labelEl = document.getElementById('ft-pomo-label');
+    if (labelEl) {
+      labelEl.textContent = pomoMode === 'work' ? '🍅 زمان تمرکز' : '🍃 زمان استراحت';
+    }
+
+    var playBtn = document.getElementById('ft-pomo-play');
+    if (playBtn) {
+      playBtn.innerHTML = pomoState === 'paused' ? '▶️' : '▶️';
+    }
+  }
+
+  function updatePomoTimer() {
+    if (!pomoEndTime) return;
+    
+    var now = Date.now();
+    var diff = Math.round((pomoEndTime - now) / 1000);
+    
+    if (diff <= 0) {
+      clearInterval(pomoTimerInterval);
+      pomoState = 'idle';
+      pomoEndTime = null;
+      pomoPausedRemaining = pomoMode === 'work' ? 300 : 1500; // switch to next mode default rest
+      pomoMode = pomoMode === 'work' ? 'break' : 'work';
+      
+      renderPomoStatic();
+      playSound('pomo-end');
+      
+      save();
+      return;
+    }
+    
+    var m = Math.floor(diff / 60);
+    var s = diff % 60;
+    
+    var timerEl = document.getElementById('ft-pomo-timer');
+    if (timerEl) {
+      timerEl.textContent = String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+    }
+
+    var labelEl = document.getElementById('ft-pomo-label');
+    if (labelEl) {
+      labelEl.textContent = pomoMode === 'work' ? '🍅 زمان تمرکز' : '🍃 زمان استراحت';
+    }
+
+    var playBtn = document.getElementById('ft-pomo-play');
+    if (playBtn) {
+      playBtn.innerHTML = '⏸️';
+    }
+  }
+
+  function togglePomoPlay() {
+    if (pomoState === 'running') {
+      // Pause
+      clearInterval(pomoTimerInterval);
+      var now = Date.now();
+      pomoPausedRemaining = Math.max(0, Math.round((pomoEndTime - now) / 1000));
+      pomoState = 'paused';
+      pomoEndTime = null;
+      
+      // حذف آلارم پس‌زمینه
+      try { chrome.alarms.clear('ft-pomo-alarm'); } catch(e){}
+    } else {
+      // Start / Resume
+      var durationSeconds = pomoState === 'paused' ? pomoPausedRemaining : (pomoMode === 'work' ? 1500 : 300);
+      pomoEndTime = Date.now() + (durationSeconds * 1000);
+      pomoState = 'running';
+      
+      // تنظیم آلارم پس‌زمینه در صورت بسته بودن افزونه
+      try {
+        chrome.alarms.create('ft-pomo-alarm', { when: pomoEndTime });
+      } catch(e){}
+
+      pomoTimerInterval = setInterval(updatePomoTimer, 1000);
+      updatePomoTimer();
+    }
+    save();
+    renderPomoStatic();
+  }
+
+  function resetPomo() {
+    clearInterval(pomoTimerInterval);
+    pomoState = 'idle';
+    pomoEndTime = null;
+    pomoPausedRemaining = pomoMode === 'work' ? 1500 : 300;
+    
+    try { chrome.alarms.clear('ft-pomo-alarm'); } catch(e){}
+    
+    save();
+    renderPomoStatic();
+  }
+
+  function togglePomoMode() {
+    clearInterval(pomoTimerInterval);
+    pomoState = 'idle';
+    pomoEndTime = null;
+    pomoMode = pomoMode === 'work' ? 'break' : 'work';
+    pomoPausedRemaining = pomoMode === 'work' ? 1500 : 300;
+    
+    try { chrome.alarms.clear('ft-pomo-alarm'); } catch(e){}
+    
+    save();
+    renderPomoStatic();
+  }
+
+  // ── پشتیبان‌گیری دیتابیس (JSON Backups) ─────────────────────────────────────
+  function exportDatabase() {
+    var dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify({
+      todos: todos,
+      theme: theme,
+      darkMode: darkMode
+    }));
+    var a = document.createElement('a');
+    a.href = dataStr;
+    a.download = 'floattodo_backup_' + new Date().toISOString().split('T')[0] + '.json';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  }
+
+  function importDatabase(e) {
+    var file = e.target.files[0];
+    if (!file) return;
+
+    var reader = new FileReader();
+    reader.onload = function(evt) {
+      try {
+        var parsed = JSON.parse(evt.target.result);
+        if (Array.isArray(parsed.todos)) {
+          todos = parsed.todos;
+          theme = parsed.theme || theme;
+          darkMode = parsed.darkMode !== false;
+          
+          save();
+          applyTheme();
+          updateList();
+          updateProgress();
+          alert('پشتیبان با موفقیت بازیابی شد!');
+        } else {
+          alert('فرمت فایل پشتیبان صحیح نیست.');
+        }
+      } catch (err) {
+        alert('خطا در پردازش فایل پشتیبان.');
+      }
+    };
+    reader.readAsText(file);
   }
 
   // ── Build ────────────────────────────────────────────────────────────────
@@ -252,14 +770,13 @@
     // ── تب کناری ─────────────────────────────────────────────────────────
     TAB=document.createElement('div');
     TAB.id='ft-tab';
-    // یه نقطه قرمز کوچیک برای نشون دادن وظیفه باقیمانده
     var dot=document.createElement('span');
     dot.id='ft-tab-dot';
     dot.style.cssText='width:6px;height:6px;border-radius:50%;background:#ef5350;display:none;flex-shrink:0;';
     TAB.appendChild(dot);
     document.body.appendChild(TAB);
 
-    // drag تب — تشخیص drag از click
+    // drag تب
     var startY, startTopPx, moved;
     TAB.addEventListener('mousedown',function(e){
       if(e.button!==0) return;
@@ -286,7 +803,6 @@
         if(moved){
           save();
         } else {
-          // کلیک — باز کردن پنل
           showPanel();applyTheme();updateList();updateProgress();updateFilters();
         }
       }
@@ -309,10 +825,20 @@
       '<div id="ft-trow">'+
         Object.entries(THEMES).map(function(e){return '<span class="ftdot" data-t="'+e[0]+'" style="background:'+e[1]+'"></span>';}).join('')+
       '</div>'+
+      '<div id="ft-pomo">'+
+        '<span id="ft-pomo-timer">25:00</span>'+
+        '<span id="ft-pomo-label">🍅 زمان تمرکز</span>'+
+        '<div id="ft-pomo-controls">'+
+          '<button class="ft-pomo-btn" id="ft-pomo-play">▶️</button>'+
+          '<button class="ft-pomo-btn" id="ft-pomo-reset">🔄</button>'+
+          '<button class="ft-pomo-btn" id="ft-pomo-mode">🔄</button>'+
+        '</div>'+
+      '</div>'+
       '<div id="ft-filters">'+
         '<button class="ftfbtn active" data-f="all">همه</button>'+
         '<button class="ftfbtn" data-f="active">باقی‌مانده</button>'+
         '<button class="ftfbtn" data-f="done">انجام‌شده</button>'+
+        '<button class="ftfbtn" data-f="stats">📊 آمار</button>' +
       '</div>'+
       '<div id="ft-addrow">'+
         '<input id="ft-inp" type="text" placeholder="وظیفه جدید..." autocomplete="off"/>'+
@@ -322,10 +848,15 @@
         '<select id="ft-pri"><option value="none">اولویت</option><option value="high">🔴 زیاد</option><option value="medium">🟡 متوسط</option><option value="low">🟢 کم</option></select>'+
         '<select id="ft-cat"><option value="">دسته</option><option value="کار">کار</option><option value="شخصی">شخصی</option><option value="خرید">خرید</option><option value="تحصیل">تحصیل</option><option value="custom">دیگر...</option></select>'+
         '<input id="ft-due" type="date"/>'+
+        '<input id="ft-time" type="time" title="ساعت یادآوری"/>' +
       '</div>'+
       '<input id="ft-srch" type="text" placeholder="🔍 جستجو..." autocomplete="off"/>'+
       '<div id="ft-prog"><div id="ft-pbar"><div id="ft-pfill"></div></div><div id="ft-ptxt"></div></div>'+
       '<div id="ft-list"></div>'+
+      '<div class="ft-backups-panel">'+
+        '<button class="ft-bkp-btn" id="ft-bkp-exp">📤 خروجی بک‌آپ</button>' +
+        '<label class="ft-bkp-btn" id="ft-bkp-imp-lbl">📥 ورود بک‌آپ<input type="file" id="ft-bkp-imp" accept=".json" style="display:none;"/></label>' +
+      '</div>' +
       '<div id="ft-foot">'+
         '<button id="ft-clr">🗑 پاک کردن انجام‌شده</button>'+
         '<select id="ft-srt"><option value="newest">جدیدترین</option><option value="priority">اولویت</option><option value="due">سررسید</option><option value="alpha">الفبا</option></select>'+
@@ -344,7 +875,16 @@
     document.getElementById('ft-clr').addEventListener('click',function(e){e.stopPropagation();todos=todos.filter(function(t){return !t.done;});save();updateList();updateProgress();});
     PANEL.querySelectorAll('input,select,button').forEach(function(el){el.addEventListener('click',function(e){e.stopPropagation();});});
     
-    // دکمه انتخاب دسته‌بندی با قابلیت درج دستی دیگر گزینه‌ها
+    // پومودورو
+    document.getElementById('ft-pomo-play').addEventListener('click', function(e){e.stopPropagation(); togglePomoPlay();});
+    document.getElementById('ft-pomo-reset').addEventListener('click', function(e){e.stopPropagation(); resetPomo();});
+    document.getElementById('ft-pomo-mode').addEventListener('click', function(e){e.stopPropagation(); togglePomoMode();});
+
+    // پشتیبان‌گیری
+    document.getElementById('ft-bkp-exp').addEventListener('click', function(e){e.stopPropagation(); exportDatabase();});
+    document.getElementById('ft-bkp-imp').addEventListener('change', importDatabase);
+
+    // درج فیلد دسته سفارشی دیگر...
     document.getElementById('ft-cat').addEventListener('change', function(e) {
       if (this.value === 'custom') {
         var customVal = prompt('نام دسته جدید را وارد کنید:');
@@ -361,6 +901,23 @@
       }
     });
 
+    // میانبرهای صفحه کلید
+    window.addEventListener('keydown', function(e) {
+      // Alt+Shift+T برای باز یا بسته کردن
+      if (e.altKey && e.shiftKey && e.code === 'KeyT') {
+        e.preventDefault();
+        if (isMini) {
+          showPanel();applyTheme();updateList();updateProgress();updateFilters();
+        } else {
+          showTab();
+        }
+      }
+      // کلید Esc برای خروج از ویرایش تسک
+      if (e.key === 'Escape' && editingTodoId) {
+        cancelEditTodo();
+      }
+    });
+
     try {
       chrome.runtime.onMessage.addListener(function(msg){
         if(msg && msg.type === 'ft-show-btn'){
@@ -368,13 +925,17 @@
         } else if (msg && msg.type === 'ft-refresh-ui') {
           load(function() {
             updateList();updateProgress();
+            syncPomoUI();
           });
+        } else if (msg && msg.type === 'ft-play-pomo-sound') {
+          playSound('pomo-end');
         }
       });
     } catch(e){}
 
     if(isMini){showTab();}else{showPanel();}
     applyTheme();updateList();updateProgress();updateFilters();
+    syncPomoUI();
   }
 
   // ── Init ─────────────────────────────────────────────────────────────────

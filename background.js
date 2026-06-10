@@ -1,6 +1,6 @@
-// FloatTodo - Background Service Worker v1.4
+// FloatTodo - Background Service Worker v1.5
 
-// ── ابزارهای تاریخ (اول تعریف میشن) ─────────────────────────────────────────
+// ── ابزارهای تاریخ ─────────────────────────────────────────
 function getDateStr(offset) {
   var d = new Date();
   d.setDate(d.getDate() + (offset || 0));
@@ -9,83 +9,132 @@ function getDateStr(offset) {
     String(d.getDate()).padStart(2,'0');
 }
 
-// ── Alarms ────────────────────────────────────────────────────────────────────
+// ── Alarms & Startup ─────────────────────────────────────────────────────────
 chrome.runtime.onInstalled.addListener(function() {
-  chrome.alarms.create('ft-hourly-check', {
-    delayInMinutes: 1,
-    periodInMinutes: 60
-  });
+  setupAlarms();
   checkDueTodos();
 });
 
 chrome.runtime.onStartup.addListener(function() {
-  chrome.alarms.create('ft-hourly-check', {
-    delayInMinutes: 1,
-    periodInMinutes: 60
-  });
+  setupAlarms();
   checkDueTodos();
 });
 
+function setupAlarms() {
+  // بررسی کارهای دارای سررسید هر ۱ دقیقه یک‌بار (حداقل زمان آلارم MV3 برای چک کردن کارهای فوری)
+  chrome.alarms.create('ft-minute-check', {
+    delayInMinutes: 1,
+    periodInMinutes: 1
+  });
+}
+
 chrome.alarms.onAlarm.addListener(function(alarm) {
-  if (alarm.name === 'ft-hourly-check') checkDueTodos();
+  if (alarm.name === 'ft-minute-check') {
+    checkDueTodos();
+    checkPomoTimer();
+  }
 });
 
-// ── چک سررسیدها ───────────────────────────────────────────────────────────────
+// ── بررسی آلارم‌های سررسید وظایف ───────────────────────────────────────────────
 function checkDueTodos() {
   chrome.storage.local.get(['ft3_todos', 'ft_notified'], function(res) {
     var todos    = Array.isArray(res.ft3_todos) ? res.ft3_todos : [];
     var notified = res.ft_notified || {};
-    var today    = getDateStr(0);
-    var tomorrow = getDateStr(1);
+    
+    var now = new Date();
+    var todayStr = getDateStr(0);
+    var tomorrowStr = getDateStr(1);
+    
+    var currentHourMin = String(now.getHours()).padStart(2,'0') + ':' + String(now.getMinutes()).padStart(2,'0');
 
     var dueToday = [], dueTomorrow = [], overdue = [];
 
     todos.forEach(function(t) {
       if (t.done || !t.due) return;
-      if (t.due < today)           overdue.push(t);
-      else if (t.due === today)    dueToday.push(t);
-      else if (t.due === tomorrow) dueTomorrow.push(t);
+      
+      // اگر کار ساعت دقیق دارد، در بررسی دقیقه چک شود
+      var hasTime = !!t.time;
+      var isOverdue = false;
+      var isToday = false;
+      var isTomorrow = false;
+      
+      if (t.due < todayStr) {
+        isOverdue = true;
+      } else if (t.due === todayStr) {
+        if (hasTime) {
+          if (t.time <= currentHourMin) {
+            isToday = true;
+          }
+        } else {
+          isToday = true;
+        }
+      } else if (t.due === tomorrowStr) {
+        isTomorrow = true;
+      }
+
+      if (isOverdue) overdue.push(t);
+      else if (isToday) dueToday.push(t);
+      else if (isTomorrow) dueTomorrow.push(t);
     });
 
     var newNotified = Object.assign({}, notified);
     var shouldShow  = false;
 
-    if (dueToday.length > 0 && !notified['today-' + today]) {
-      sendNotif('ft-today', '📋 وظایف امروز — ' + dueToday.length + ' مورد',
-        dueToday.slice(0,3).map(function(t) {
-          return (t.priority==='high'?'🔴 ':t.priority==='medium'?'🟡 ':'') + t.text;
-        }).join('\n') + (dueToday.length > 3 ? '\n...و ' + (dueToday.length-3) + ' مورد دیگر' : '')
+    // ارسال نوتیفیکیشن کارهای امروز
+    var unnotifiedToday = dueToday.filter(function(t) {
+      var key = t.id + '-today-' + todayStr;
+      return !notified[key];
+    });
+
+    if (unnotifiedToday.length > 0) {
+      sendNotif('ft-today', '📋 یادآوری وظایف امروز',
+        unnotifiedToday.slice(0,3).map(function(t) {
+          var timePart = t.time ? ' (' + t.time + ')' : '';
+          return (t.priority==='high'?'🔴 ':t.priority==='medium'?'🟡 ':'') + t.text + timePart;
+        }).join('\n') + (unnotifiedToday.length > 3 ? '\n...و ' + (unnotifiedToday.length-3) + ' مورد دیگر' : '')
       );
-      newNotified['today-' + today] = true;
+      unnotifiedToday.forEach(function(t) {
+        newNotified[t.id + '-today-' + todayStr] = true;
+      });
       shouldShow = true;
     }
 
-    if (dueTomorrow.length > 0 && !notified['tomorrow-' + tomorrow]) {
-      sendNotif('ft-tomorrow', '⏰ یادآوری — فردا ' + dueTomorrow.length + ' وظیفه داری',
+    // ارسال نوتیفیکیشن کارهای فردا (یک‌بار در روز)
+    if (dueTomorrow.length > 0 && !notified['tomorrow-' + tomorrowStr]) {
+      sendNotif('ft-tomorrow', '⏰ یادآوری کارهای فردا',
         dueTomorrow.slice(0,3).map(function(t) { return '• ' + t.text; }).join('\n')
       );
-      newNotified['tomorrow-' + tomorrow] = true;
+      newNotified['tomorrow-' + tomorrowStr] = true;
       shouldShow = true;
     }
 
-    if (overdue.length > 0 && !notified['overdue-' + today]) {
-      sendNotif('ft-overdue', '⚠️ ' + overdue.length + ' وظیفه عقب‌افتاده!',
-        overdue.slice(0,3).map(function(t) { return '• ' + t.text + ' (' + t.due + ')'; }).join('\n')
+    // ارسال نوتیفیکیشن کارهای عقب‌افتاده
+    var unnotifiedOverdue = overdue.filter(function(t) {
+      var key = t.id + '-overdue-' + todayStr;
+      return !notified[key];
+    });
+
+    if (unnotifiedOverdue.length > 0) {
+      sendNotif('ft-overdue', '⚠️ وظایف عقب‌افتاده شما!',
+        unnotifiedOverdue.slice(0,3).map(function(t) { return '• ' + t.text + ' (' + t.due + ')'; }).join('\n')
       );
-      newNotified['overdue-' + today] = true;
+      unnotifiedOverdue.forEach(function(t) {
+        newNotified[t.id + '-overdue-' + todayStr] = true;
+      });
       shouldShow = true;
     }
 
-    // پاک کردن کلیدهای قدیمی
+    // پاک کردن نوتیفیکیشن‌های قدیمی تر از ۴ روز پیش
     var cutoff = getDateStr(-4);
     Object.keys(newNotified).forEach(function(k) {
-      var d = k.split('-').slice(1).join('-');
-      if (d && d < cutoff) delete newNotified[k];
+      var parts = k.split('-');
+      var datePart = parts.slice(1).join('-');
+      if (datePart && datePart < cutoff) delete newNotified[k];
     });
 
     chrome.storage.local.set({ ft_notified: newNotified });
 
-    // اگه نوتیف فرستادیم، پنل رو در همه تب‌ها نشون بده
+    // ارسال سیگنال لرزش یا بازشدگی به صفحات وب
     if (shouldShow) {
       chrome.tabs.query({}, function(tabs) {
         tabs.forEach(function(tab) {
@@ -98,6 +147,45 @@ function checkDueTodos() {
   });
 }
 
+// ── مدیریت پومودورو در بک‌گراند ────────────────────────────────────────────────
+function checkPomoTimer() {
+  chrome.storage.local.get(['ft_pomo_end', 'ft_pomo_state', 'ft_pomo_mode'], function(r) {
+    if (r.ft_pomo_state === 'running' && r.ft_pomo_end) {
+      var now = Date.now();
+      if (now >= r.ft_pomo_end) {
+        // پایان تایمر پومودورو
+        var nextMode = r.ft_pomo_mode === 'work' ? 'break' : 'work';
+        var msg = r.ft_pomo_mode === 'work' 
+          ? '🍅 زمان تمرکز شما به پایان رسید! وقت استراحت است.' 
+          : '🍃 زمان استراحت به پایان رسید! آماده تمرکز بعدی هستید؟';
+        
+        sendNotif('ft-pomo-notif', 'پومودورو FloatTodo', msg);
+
+        // بروزرسانی وضعیت در استوریج
+        chrome.storage.local.set({
+          ft_pomo_state: 'idle',
+          ft_pomo_mode: nextMode,
+          ft_pomo_end: null
+        }, function() {
+          // خبر دادن به تمامی تب‌ها جهت آپدیت پویای تایمر
+          chrome.tabs.query({}, function(tabs) {
+            tabs.forEach(function(tab) {
+              chrome.tabs.sendMessage(tab.id, { type: 'ft-refresh-ui' }, function() {
+                if (chrome.runtime.lastError) {}
+              });
+              // ارسال سیگنال صوتی پومودورو به تب‌ها جهت بوق زدن
+              chrome.tabs.sendMessage(tab.id, { type: 'ft-play-pomo-sound' }, function() {
+                if (chrome.runtime.lastError) {}
+              });
+            });
+          });
+        });
+      }
+    }
+  });
+}
+
+// ── ارسال نوتیفیکیشن‌ها ────────────────────────────────────────────────────────
 function sendNotif(id, title, message) {
   chrome.notifications.clear(id, function() {
     chrome.notifications.create(id, {
@@ -111,7 +199,7 @@ function sendNotif(id, title, message) {
   });
 }
 
-// گوش دادن به کلیک دکمه‌های نوتیفیکیشن دسکتاپ
+// گوش دادن به دکمه‌های اقدام سریع در نوتیفیکیشن دسکتاپ
 chrome.notifications.onButtonClicked.addListener(function(notifId, btnIndex) {
   if (btnIndex === 0) {
     chrome.storage.local.get(['ft3_todos'], function(res) {
@@ -128,7 +216,6 @@ chrome.notifications.onButtonClicked.addListener(function(notifId, btnIndex) {
 
       if (updated) {
         chrome.storage.local.set({ ft3_todos: todos }, function() {
-          // ارسال سیگنال رفرش به همه تب‌های فعال
           chrome.tabs.query({}, function(tabs) {
             tabs.forEach(function(tab) {
               chrome.tabs.sendMessage(tab.id, { type: 'ft-refresh-ui' }, function() {
