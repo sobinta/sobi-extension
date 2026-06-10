@@ -8,12 +8,6 @@
   var darkMode=true, searchQ='', isMini=false, tabY=40, editingTodoId=null;
   var expandedTodoIds={}; // آیدی تسک‌هایی که بخش زیروظایف آن‌ها باز است
 
-  // Pomodoro local variables
-  var pomoTimerInterval = null;
-  var pomoState = 'idle'; // idle, running, paused
-  var pomoMode = 'work'; // work, break
-  var pomoEndTime = null;
-  var pomoPausedRemaining = 1500; // default 25 mins in seconds
 
   var THEMES={purple:'#7c6ff7',rose:'#f06292',cyan:'#26c6da',green:'#66bb6a',amber:'#ffa726',red:'#ef5350'};
   var PRI={high:'#ef5350',medium:'#ffa726',low:'#66bb6a',none:'#7c6ff7'};
@@ -27,11 +21,7 @@
         ft3_theme:theme,
         ft3_dark:darkMode,
         ft3_mini:isMini,
-        ft3_tabY:tabY,
-        ft_pomo_state:pomoState,
-        ft_pomo_mode:pomoMode,
-        ft_pomo_end:pomoEndTime,
-        ft_pomo_paused_rem:pomoPausedRemaining
+        ft3_tabY:tabY
       }); 
     } catch(e){}
   }
@@ -39,20 +29,13 @@
   function load(cb) {
     try {
       chrome.storage.local.get([
-        'ft3_todos','ft3_theme','ft3_dark','ft3_mini','ft3_tabY',
-        'ft_pomo_state','ft_pomo_mode','ft_pomo_end','ft_pomo_paused_rem'
+        'ft3_todos','ft3_theme','ft3_dark','ft3_mini','ft3_tabY'
       ],function(r){
         todos=Array.isArray(r.ft3_todos)?r.ft3_todos:[];
         theme=r.ft3_theme||'purple'; 
         darkMode=r.ft3_dark!==false;
         isMini=r.ft3_mini===true; 
         tabY=typeof r.ft3_tabY==='number'?r.ft3_tabY:40;
-        
-        pomoState=r.ft_pomo_state||'idle';
-        pomoMode=r.ft_pomo_mode||'work';
-        pomoEndTime=r.ft_pomo_end||null;
-        pomoPausedRemaining=typeof r.ft_pomo_paused_rem==='number'?r.ft_pomo_paused_rem:1500;
-
         cb();
       });
     } catch(e){cb();}
@@ -113,27 +96,7 @@
         gain.gain.linearRampToValueAtTime(0.001, ctx.currentTime + 0.25);
         osc.start();
         osc.stop(ctx.currentTime + 0.25);
-      } else if (type === 'pomo-end') {
-        // بوق پایان پومودورو (دومرحله‌ای ملایم)
-        osc.type = 'triangle';
-        osc.frequency.setValueAtTime(659.25, ctx.currentTime); // E5
-        gain.gain.setValueAtTime(0.15, ctx.currentTime);
-        gain.gain.linearRampToValueAtTime(0.001, ctx.currentTime + 0.2);
-        
-        var osc2 = ctx.createOscillator();
-        var gain2 = ctx.createGain();
-        osc2.connect(gain2);
-        gain2.connect(ctx.destination);
-        osc2.type = 'triangle';
-        osc2.frequency.setValueAtTime(880.00, ctx.currentTime + 0.2); // A5
-        gain2.gain.setValueAtTime(0.15, ctx.currentTime + 0.2);
-        gain2.gain.linearRampToValueAtTime(0.001, ctx.currentTime + 0.5);
-        
-        osc.start();
-        osc.stop(ctx.currentTime + 0.2);
-        osc2.start(ctx.currentTime + 0.2);
-        osc2.stop(ctx.currentTime + 0.5);
-      }
+
     } catch(e){}
   }
 
@@ -143,8 +106,6 @@
     TAB.style.cssText='position:fixed!important;display:none!important;';
     PANEL.style.cssText='position:fixed!important;bottom:0!important;right:0!important;width:320px!important;max-height:560px!important;display:flex!important;flex-direction:column!important;z-index:2147483647!important;';
     save();
-    // همگام‌سازی تایمر پومودورو هنگام باز شدن
-    syncPomoUI();
   }
   
   function showTab(){
@@ -585,142 +546,7 @@
     save();updateList();updateProgress();
   }
 
-  // ── مدیریت پومودورو (Pomodoro Client logic) ──────────────────────────────────
-  function syncPomoUI() {
-    chrome.storage.local.get(['ft_pomo_state', 'ft_pomo_mode', 'ft_pomo_end', 'ft_pomo_paused_rem'], function(r) {
-      pomoState = r.ft_pomo_state || 'idle';
-      pomoMode = r.ft_pomo_mode || 'work';
-      pomoEndTime = r.ft_pomo_end || null;
-      pomoPausedRemaining = typeof r.ft_pomo_paused_rem === 'number' ? r.ft_pomo_paused_rem : 1500;
-      
-      clearInterval(pomoTimerInterval);
-      
-      if (pomoState === 'running' && pomoEndTime) {
-        pomoTimerInterval = setInterval(updatePomoTimer, 1000);
-        updatePomoTimer();
-      } else {
-        renderPomoStatic();
-      }
-    });
-  }
 
-  function renderPomoStatic() {
-    var secs = pomoPausedRemaining;
-    if (pomoState === 'idle') {
-      secs = pomoMode === 'work' ? 1500 : 300; // 25m or 5m
-    }
-    
-    var m = Math.floor(secs / 60);
-    var s = secs % 60;
-    
-    var timerEl = document.getElementById('ft-pomo-timer');
-    if (timerEl) {
-      timerEl.textContent = String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
-    }
-
-    var labelEl = document.getElementById('ft-pomo-label');
-    if (labelEl) {
-      labelEl.textContent = pomoMode === 'work' ? '🍅 زمان تمرکز' : '🍃 زمان استراحت';
-    }
-
-    var playBtn = document.getElementById('ft-pomo-play');
-    if (playBtn) {
-      playBtn.innerHTML = pomoState === 'paused' ? '▶️' : '▶️';
-    }
-  }
-
-  function updatePomoTimer() {
-    if (!pomoEndTime) return;
-    
-    var now = Date.now();
-    var diff = Math.round((pomoEndTime - now) / 1000);
-    
-    if (diff <= 0) {
-      clearInterval(pomoTimerInterval);
-      pomoState = 'idle';
-      pomoEndTime = null;
-      pomoPausedRemaining = pomoMode === 'work' ? 300 : 1500; // switch to next mode default rest
-      pomoMode = pomoMode === 'work' ? 'break' : 'work';
-      
-      renderPomoStatic();
-      playSound('pomo-end');
-      
-      save();
-      return;
-    }
-    
-    var m = Math.floor(diff / 60);
-    var s = diff % 60;
-    
-    var timerEl = document.getElementById('ft-pomo-timer');
-    if (timerEl) {
-      timerEl.textContent = String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
-    }
-
-    var labelEl = document.getElementById('ft-pomo-label');
-    if (labelEl) {
-      labelEl.textContent = pomoMode === 'work' ? '🍅 زمان تمرکز' : '🍃 زمان استراحت';
-    }
-
-    var playBtn = document.getElementById('ft-pomo-play');
-    if (playBtn) {
-      playBtn.innerHTML = '⏸️';
-    }
-  }
-
-  function togglePomoPlay() {
-    if (pomoState === 'running') {
-      // Pause
-      clearInterval(pomoTimerInterval);
-      var now = Date.now();
-      pomoPausedRemaining = Math.max(0, Math.round((pomoEndTime - now) / 1000));
-      pomoState = 'paused';
-      pomoEndTime = null;
-      
-      // حذف آلارم پس‌زمینه
-      try { chrome.alarms.clear('ft-pomo-alarm'); } catch(e){}
-    } else {
-      // Start / Resume
-      var durationSeconds = pomoState === 'paused' ? pomoPausedRemaining : (pomoMode === 'work' ? 1500 : 300);
-      pomoEndTime = Date.now() + (durationSeconds * 1000);
-      pomoState = 'running';
-      
-      // تنظیم آلارم پس‌زمینه در صورت بسته بودن افزونه
-      try {
-        chrome.alarms.create('ft-pomo-alarm', { when: pomoEndTime });
-      } catch(e){}
-
-      pomoTimerInterval = setInterval(updatePomoTimer, 1000);
-      updatePomoTimer();
-    }
-    save();
-    renderPomoStatic();
-  }
-
-  function resetPomo() {
-    clearInterval(pomoTimerInterval);
-    pomoState = 'idle';
-    pomoEndTime = null;
-    pomoPausedRemaining = pomoMode === 'work' ? 1500 : 300;
-    
-    try { chrome.alarms.clear('ft-pomo-alarm'); } catch(e){}
-    
-    save();
-    renderPomoStatic();
-  }
-
-  function togglePomoMode() {
-    clearInterval(pomoTimerInterval);
-    pomoState = 'idle';
-    pomoEndTime = null;
-    pomoMode = pomoMode === 'work' ? 'break' : 'work';
-    pomoPausedRemaining = pomoMode === 'work' ? 1500 : 300;
-    
-    try { chrome.alarms.clear('ft-pomo-alarm'); } catch(e){}
-    
-    save();
-    renderPomoStatic();
-  }
 
   // ── پشتیبان‌گیری دیتابیس (JSON Backups) ─────────────────────────────────────
   function exportDatabase() {
@@ -825,15 +651,6 @@
       '<div id="ft-trow">'+
         Object.entries(THEMES).map(function(e){return '<span class="ftdot" data-t="'+e[0]+'" style="background:'+e[1]+'"></span>';}).join('')+
       '</div>'+
-      '<div id="ft-pomo">'+
-        '<span id="ft-pomo-timer">25:00</span>'+
-        '<span id="ft-pomo-label">🍅 زمان تمرکز</span>'+
-        '<div id="ft-pomo-controls">'+
-          '<button class="ft-pomo-btn" id="ft-pomo-play">▶️</button>'+
-          '<button class="ft-pomo-btn" id="ft-pomo-reset">🔄</button>'+
-          '<button class="ft-pomo-btn" id="ft-pomo-mode">🔄</button>'+
-        '</div>'+
-      '</div>'+
       '<div id="ft-filters">'+
         '<button class="ftfbtn active" data-f="all">همه</button>'+
         '<button class="ftfbtn" data-f="active">باقی‌مانده</button>'+
@@ -875,11 +692,6 @@
     document.getElementById('ft-clr').addEventListener('click',function(e){e.stopPropagation();todos=todos.filter(function(t){return !t.done;});save();updateList();updateProgress();});
     PANEL.querySelectorAll('input,select,button').forEach(function(el){el.addEventListener('click',function(e){e.stopPropagation();});});
     
-    // پومودورو
-    document.getElementById('ft-pomo-play').addEventListener('click', function(e){e.stopPropagation(); togglePomoPlay();});
-    document.getElementById('ft-pomo-reset').addEventListener('click', function(e){e.stopPropagation(); resetPomo();});
-    document.getElementById('ft-pomo-mode').addEventListener('click', function(e){e.stopPropagation(); togglePomoMode();});
-
     // پشتیبان‌گیری
     document.getElementById('ft-bkp-exp').addEventListener('click', function(e){e.stopPropagation(); exportDatabase();});
     document.getElementById('ft-bkp-imp').addEventListener('change', importDatabase);
@@ -925,17 +737,13 @@
         } else if (msg && msg.type === 'ft-refresh-ui') {
           load(function() {
             updateList();updateProgress();
-            syncPomoUI();
           });
-        } else if (msg && msg.type === 'ft-play-pomo-sound') {
-          playSound('pomo-end');
         }
       });
     } catch(e){}
 
     if(isMini){showTab();}else{showPanel();}
     applyTheme();updateList();updateProgress();updateFilters();
-    syncPomoUI();
   }
 
   // ── Init ─────────────────────────────────────────────────────────────────

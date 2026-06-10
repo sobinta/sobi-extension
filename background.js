@@ -31,7 +31,6 @@ function setupAlarms() {
 chrome.alarms.onAlarm.addListener(function(alarm) {
   if (alarm.name === 'ft-minute-check') {
     checkDueTodos();
-    checkPomoTimer();
   }
 });
 
@@ -147,43 +146,7 @@ function checkDueTodos() {
   });
 }
 
-// ── مدیریت پومودورو در بک‌گراند ────────────────────────────────────────────────
-function checkPomoTimer() {
-  chrome.storage.local.get(['ft_pomo_end', 'ft_pomo_state', 'ft_pomo_mode'], function(r) {
-    if (r.ft_pomo_state === 'running' && r.ft_pomo_end) {
-      var now = Date.now();
-      if (now >= r.ft_pomo_end) {
-        // پایان تایمر پومودورو
-        var nextMode = r.ft_pomo_mode === 'work' ? 'break' : 'work';
-        var msg = r.ft_pomo_mode === 'work' 
-          ? '🍅 زمان تمرکز شما به پایان رسید! وقت استراحت است.' 
-          : '🍃 زمان استراحت به پایان رسید! آماده تمرکز بعدی هستید؟';
-        
-        sendNotif('ft-pomo-notif', 'پومودورو FloatTodo', msg);
 
-        // بروزرسانی وضعیت در استوریج
-        chrome.storage.local.set({
-          ft_pomo_state: 'idle',
-          ft_pomo_mode: nextMode,
-          ft_pomo_end: null
-        }, function() {
-          // خبر دادن به تمامی تب‌ها جهت آپدیت پویای تایمر
-          chrome.tabs.query({}, function(tabs) {
-            tabs.forEach(function(tab) {
-              chrome.tabs.sendMessage(tab.id, { type: 'ft-refresh-ui' }, function() {
-                if (chrome.runtime.lastError) {}
-              });
-              // ارسال سیگنال صوتی پومودورو به تب‌ها جهت بوق زدن
-              chrome.tabs.sendMessage(tab.id, { type: 'ft-play-pomo-sound' }, function() {
-                if (chrome.runtime.lastError) {}
-              });
-            });
-          });
-        });
-      }
-    }
-  });
-}
 
 // ── ارسال نوتیفیکیشن‌ها ────────────────────────────────────────────────────────
 function sendNotif(id, title, message) {
