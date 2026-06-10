@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CodeVision | استودیو توسعه وب زنده</title>
+    <!-- Google Font: Vazir + Inter -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Vazir:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <!-- Font Awesome 6 Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    
+    <!-- CodeMirror Local Styles -->
+    <link rel="stylesheet" href="lib/codemirror.css">
+    <link rel="stylesheet" href="lib/theme/dracula.css">
+    
+    <!-- Custom Stylesheet -->
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- HEADER (Glassmorphic) -->
+        <header class="header">
+            <div class="header-right">
+                <button class="btn-icon" id="toggleSidebarBtn" data-tooltip="پروژه‌ها">
+                    <i class="fas fa-bars"></i>
+                </button>
+                <div class="logo-section">
+                    <div class="logo-icon">
+                        <i class="fas fa-code"></i>
+                    </div>
+                    <span class="logo-text">کدویژن</span>
+                    <span class="badge"><i class="fas fa-sync-alt"></i> Live</span>
+                </div>
+                <!-- Project Selector Display -->
+                <div class="active-project-info">
+                    <span class="project-label">پروژه فعلی:</span>
+                    <span class="project-name" id="currentProjectDisplay">بدون نام</span>
+                    <button class="btn-mini-action" id="renameProjectBtn" data-tooltip="تغییر نام">
+                        <i class="fas fa-pen"></i>
+                    </button>
+                </div>
+            </div>
+            
+            <div class="header-left">
+                <div class="btn-group">
+                    <button class="btn-secondary" id="openLibraryBtn">
+                        <i class="fas fa-puzzle-piece"></i> کتابخانه‌ها
+                    </button>
+                    <button class="btn-secondary" id="openSettingsBtn">
+                        <i class="fas fa-cog"></i> تنظیمات
+                    </button>
+                    <button class="btn-primary" id="runBtn">
+                        <i class="fas fa-play"></i> اجرا
+                    </button>
+                </div>
+            </div>
+        </header>
+
+        <!-- MAIN LAYOUT PANEL -->
+        <div class="main-layout">
+            <!-- SIDEBAR: Project Manager (Collapsible) -->
+            <aside class="sidebar" id="projectSidebar">
+                <div class="sidebar-header">
+                    <h3><i class="fas fa-folder-open"></i> مدیریت پروژه‌ها</h3>
+                    <button class="btn-action" id="newProjectBtn" data-tooltip="پروژه جدید">
+                        <i class="fas fa-plus"></i>
+                    </button>
+                </div>
+                <div class="project-list-container">
+                    <ul class="project-list" id="projectList">
+                        <!-- Projects loaded via JS -->
+                    </ul>
+                </div>
+            </aside>
+
+            <!-- WORKSPACE -->
+            <main class="workspace">
+                <!-- EDITOR PANEL -->
+                <div class="editor-pane">
+                    <div class="pane-header">
+                        <div class="tabs">
+                            <button class="tab-btn active" data-tab="html">
+                                <i class="fab fa-html5" style="color: #e34c26;"></i> HTML
+                            </button>
+                            <button class="tab-btn" data-tab="css">
+                                <i class="fab fa-css3-alt" style="color: #264de4;"></i> CSS
+                            </button>
+                            <button class="tab-btn" data-tab="js">
+                                <i class="fab fa-js-square" style="color: #f0db4f;"></i> JS
+                            </button>
+                        </div>
+                        <div class="pane-actions">
+                            <button class="btn-action" id="copyCodeBtn" data-tooltip="کپی کل پروژه">
+                                <i class="fas fa-copy"></i>
+                            </button>
+                            <button class="btn-action" id="downloadCodeBtn" data-tooltip="دانلود فایل HTML">
+                                <i class="fas fa-download"></i>
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <!-- Editor Containers (CodeMirror) -->
+                    <div class="editors-wrapper">
+                        <div class="editor-container active" id="htmlEditorContainer"></div>
+                        <div class="editor-container" id="cssEditorContainer"></div>
+                        <div class="editor-container" id="jsEditorContainer"></div>
+                    </div>
+                </div>
+
+                <!-- PREVIEW & CONSOLE PANEL -->
+                <div class="preview-pane">
+                    <div class="pane-header">
+                        <div class="preview-title">
+                            <span class="live-dot"></span>
+                            <span>خروجی زنده</span>
+                        </div>
+                        <div class="preview-actions">
+                            <button class="btn-mini-action" id="refreshPreviewBtn" data-tooltip="بازنشانی فریم">
+                                <i class="fas fa-redo-alt"></i>
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div class="preview-frame-wrapper">
+                        <iframe id="resultFrame" title="output" sandbox="allow-same-origin allow-scripts allow-popups allow-forms allow-modals allow-downloads"></iframe>
+                    </div>
+
+                    <!-- CONSOLE PANEL (Collapsible) -->
+                    <div class="console-panel collapsed" id="consolePanel">
+                        <div class="console-header" id="consoleHeader">
+                            <div class="console-title">
+                                <i class="fas fa-terminal"></i>
+                                <span>کنسول خروجی</span>
+                                <span class="console-badge" id="consoleLogCount">0</span>
+                            </div>
+                            <div class="console-actions">
+                                <button class="console-filter-btn active" data-filter="all">همه</button>
+                                <button class="console-filter-btn" data-filter="log">Log</button>
+                                <button class="console-filter-btn" data-filter="warn">Warn</button>
+                                <button class="console-filter-btn" data-filter="error">Error</button>
+                                <span class="console-divider">|</span>
+                                <button class="btn-mini-action" id="clearConsoleBtn" data-tooltip="پاک کردن کنسول">
+                                    <i class="fas fa-ban"></i>
+                                </button>
+                                <button class="btn-mini-action" id="toggleConsoleBtn" data-tooltip="باز/بستن کنسول">
+                                    <i class="fas fa-chevron-up"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="console-logs-wrapper" id="consoleLogs">
+                            <!-- Console messages appended here -->
+                        </div>
+                    </div>
+                </div>
+            </main>
+        </div>
+
+        <!-- SETTINGS SLIDE-OUT PANEL (Modal Overlay) -->
+        <div class="overlay" id="settingsOverlay">
+            <div class="settings-panel">
+                <div class="settings-header">
+                    <h2><i class="fas fa-sliders-h"></i> تنظیمات ویرایشگر</h2>
+                    <button class="btn-close" id="closeSettingsBtn">&times;</button>
+                </div>
+                <div class="settings-content">
+                    <!-- Theme, Font size, Tab size -->
+                    <div class="settings-group">
+                        <label for="fontSizeSelect"><i class="fas fa-text-height"></i> اندازه قلم</label>
+                        <select id="fontSizeSelect">
+                            <option value="12px">۱۲ پیکسل</option>
+                            <option value="14px" selected>۱۴ پیکسل</option>
+                            <option value="16px">۱۶ پیکسل</option>
+                            <option value="18px">۱۸ پیکسل</option>
+                            <option value="20px">۲۰ پیکسل</option>
+                        </select>
+                    </div>
+
+                    <div class="settings-group">
+                        <label for="tabSizeSelect"><i class="fas fa-indent"></i> فاصله‌گذاری (Tab)</label>
+                        <select id="tabSizeSelect">
+                            <option value="2">۲ فاصله (محبوب)</option>
+                            <option value="4" selected>۴ فاصله</option>
+                        </select>
+                    </div>
+
+                    <div class="settings-group">
+                        <label class="switch-label">
+                            <span><i class="fas fa-bolt"></i> رندر خودکار کد (Live Render)</span>
+                            <input type="checkbox" id="autoRefreshCheckbox" checked>
+                        </label>
+                    </div>
+
+                    <div class="settings-group">
+                        <label class="switch-label">
+                            <span><i class="fas fa-save"></i> ذخیره‌سازی خودکار (Auto-Save)</span>
+                            <input type="checkbox" id="autoSaveCheckbox" checked>
+                        </label>
+                    </div>
+
+                    <hr class="settings-divider">
+
+                    <!-- Import Single HTML -->
+                    <div class="settings-group">
+                        <h3><i class="fas fa-file-import"></i> وارد کردن پروژه از فایل HTML</h3>
+                        <p class="settings-help">یک فایل HTML تک‌فایلی را انتخاب کنید تا استایل‌ها و اسکریپت‌های آن به صورت هوشمند جدا شده و در تب‌ها قرار گیرند.</p>
+                        <label class="btn-file-upload">
+                            <i class="fas fa-cloud-upload-alt"></i> انتخاب فایل HTML...
+                            <input type="file" id="importFileSelector" accept=".html">
+                        </label>
+                    </div>
+
+                    <hr class="settings-divider">
+
+                    <!-- Export/Import Database JSON -->
+                    <div class="settings-group">
+                        <h3><i class="fas fa-database"></i> پشتیبان‌گیری از کل پروژه‌ها</h3>
+                        <div class="backup-buttons">
+                            <button class="btn-secondary" id="exportBackupBtn">
+                                <i class="fas fa-download"></i> خروجی پشتیبان (JSON)
+                            </button>
+                            <label class="btn-secondary file-backup-label">
+                                <i class="fas fa-upload"></i> بازیابی پشتیبان...
+                                <input type="file" id="importBackupSelector" accept=".json">
+                            </label>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- LIBRARIES MODAL -->
+        <div class="overlay" id="librariesOverlay">
+            <div class="libraries-panel">
+                <div class="libraries-header">
+                    <h2><i class="fas fa-puzzle-piece"></i> افزودن کتابخانه به پروژه</h2>
+                    <button class="btn-close" id="closeLibrariesBtn">&times;</button>
+                </div>
+                <div class="libraries-content">
+                    <p class="lib-desc">کتابخانه‌های مورد نیاز خود را انتخاب کنید تا تگ‌های CDN مربوطه به طور خودکار به سربرگ (HTML) پروژه فعلی تزریق شوند.</p>
+                    <div class="libraries-grid">
+                        <div class="lib-card" data-cdn="tailwind">
+                            <div class="lib-info">
+                                <h4>Tailwind CSS</h4>
+                                <p>فریم‌ورک استایل‌دهی مدرن CSS مبتنی بر کلاس‌های کمکی.</p>
+                            </div>
+                            <button class="btn-lib-add">افزودن</button>
+                        </div>
+
+                        <div class="lib-card" data-cdn="bootstrap">
+                            <div class="lib-info">
+                                <h4>Bootstrap CSS</h4>
+                                <p>فریم‌ورک محبوب و منعطف طراحی رابط کاربری.</p>
+                            </div>
+                            <button class="btn-lib-add">افزودن</button>
+                        </div>
+
+                        <div class="lib-card" data-cdn="fontawesome">
+                            <div class="lib-info">
+                                <h4>Font Awesome Icons</h4>
+                                <p>مجموعه کامل و محبوب‌ترین آیکون‌های وکتور.</p>
+                            </div>
+                            <button class="btn-lib-add">افزودن</button>
+                        </div>
+
+                        <div class="lib-card" data-cdn="jquery">
+                            <div class="lib-info">
+                                <h4>jQuery</h4>
+                                <p>کتابخانه ساده‌سازی دستورات جاوااسکریپت و تعامل با DOM.</p>
+                            </div>
+                            <button class="btn-lib-add">افزودن</button>
+                        </div>
+
+                        <div class="lib-card" data-cdn="react">
+                            <div class="lib-info">
+                                <h4>React (via CDN)</h4>
+                                <p>نسخه توسعه کتابخانه محبوب طراحی رابط کاربری کامپوننت‌محور.</p>
+                            </div>
+                            <button class="btn-lib-add">افزودن</button>
+                        </div>
+
+                        <div class="lib-card" data-cdn="animate">
+                            <div class="lib-info">
+                                <h4>Animate.css</h4>
+                                <p>کتابخانه‌ای آماده برای افزودن انیمیشن‌های متنوع CSS.</p>
+                            </div>
+                            <button class="btn-lib-add">افزودن</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Custom Beautiful Notifications -->
+        <div class="custom-notification" id="appNotification">
+            <i class="fas fa-check-circle"></i>
+            <span class="notification-text">عملیات با موفقیت انجام شد</span>
+        </div>
+    </div>
+
+    <!-- CodeMirror Core and addons -->
+    <script src="lib/codemirror.js"></script>
+    <script src="lib/addon/closebrackets.js"></script>
+    <script src="lib/addon/closetag.js"></script>
+    
+    <!-- CodeMirror Modes (Syntax Highlighting Engines) -->
+    <script src="lib/mode/xml.js"></script>
+    <script src="lib/mode/javascript.js"></script>
+    <script src="lib/mode/css.js"></script>
+    <script src="lib/mode/htmlmixed.js"></script>
+
+    <!-- Custom Logic Script -->
+    <script src="app.js"></script>
+</body>
+</html>
